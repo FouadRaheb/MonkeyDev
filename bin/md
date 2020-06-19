@@ -484,7 +484,10 @@ function createTarForDebianPackage() # args: sourceDir, outputDir, tarName [, op
 	
 	pushd "$sourceDir" 1> /dev/null
 
-	tar -cLpz --disable-copyfile --exclude ".*" "$@" -f "$outputDir/$tarName.tar.gz" * || \
+	#tar -cLpz --disable-copyfile --exclude ".*" "$@" -f "$outputDir/$tarName.tar.gz" * || \
+	#	panic $? "Failed to create $tarName archive"
+
+	gtar -chpz --exclude ".*" "$@" -f "$outputDir/$tarName.tar.gz" * || \
 		panic $? "Failed to create $tarName archive"
 
 	popd 1> /dev/null
@@ -813,57 +816,62 @@ function xcodeBuildPhase() # no args
 	
 	fi
 
-	#如果是profie或者用户设置了每次build都install或package，生成deb
-	if [[ "$CONFIGURATION" == "Release" && "$VALIDATE_PRODUCT" == "YES" ]] || [[ "$MonkeyDevInstallOnAnyBuild" == "YES" ]] || [[ "$MonkeyDevBuildPackageOnAnyBuild" == "YES" ]]; then
-		requireDir "$packageDirectory"
-		#准备打包
-		echo "Copying $packageInstallSource to package directory at $packageInstallPath..."
-		
-		requireDir "$packageInstallPath" true
-		
-		#拷贝目标文件到/Package/Library/MobileSubstrate/DynamicLibraries
-		copyFile "$packageInstallSource" "$packageInstallPath"
-
-		buildPackage "$packageDirectory" "$allPackagesDir" true
-		
-		#profile或者用户设置了build安装
-		if [[ "$CONFIGURATION" == "Release" && "$VALIDATE_PRODUCT" == "YES" ]] || [[ "$MonkeyDevInstallOnAnyBuild" == "YES" ]]; then
-		
-			if [[ "$DEPLOYMENT_POSTPROCESSING" == "NO" || "$MonkeyDevInstallOnAnyBuild" == "YES" ]]; then
+	# Set MonkeyDevDisableBuildingPackage to YES in xcode Build Settings to disable building the package and manually grab the dylibs from LatestBuild
+	if [[ "$MonkeyDevDisableBuildingPackage" == "YES" ]]; then
+		echo "Not building package because MonkeyDevDisableBuildingPackage is set to YES"
+	else
+		#如果是profie或者用户设置了每次build都install或package，生成deb
+		if [[ "$CONFIGURATION" == "Release" && "$VALIDATE_PRODUCT" == "YES" ]] || [[ "$MonkeyDevInstallOnAnyBuild" == "YES" ]] || [[ "$MonkeyDevBuildPackageOnAnyBuild" == "YES" ]]; then
+			requireDir "$packageDirectory"
+			#准备打包
+			echo "Copying $packageInstallSource to package directory at $packageInstallPath..."
 			
-				# if build setting MonkeyDevInstallOnProfiling is enabled, installation of package is enabled...
-				if [[ "$MonkeyDevInstallOnProfiling" == "YES"  || "$MonkeyDevInstallOnAnyBuild" == "YES" ]]; then
-				
-					# if MonkeyDevDeviceIP has a value, install package on device...
-					if [[ "$MonkeyDevDeviceIP" != "" ]]; then
-	
-						# get package file name #
-						packageFileName="`getPackageFileNameUsingControlFile \"$packageDirectory/DEBIAN/control\"`.deb"
-							
-						# install package on device #					
-						managePackageOnDevice "install" "$allPackagesDir/$packageFileName" "$MonkeyDevDeviceIP" "$MonkeyDevDevicePort"
-						
-						if [[ "$MonkeyDevkillProcessOnInstall" != "" ]]; then
-							if [[ "$MonkeyDevkillProcessOnInstall" == "SpringBoard" ]]; then
-								echo "respring device..."
-								runFuncOnDevice "respring" "$MonkeyDevDeviceIP" "$MonkeyDevDevicePort" 
-							else
-								echo "killall -9 $MonkeyDevkillProcessOnInstall"
-								runFuncOnDevice "killall -9 $MonkeyDevkillProcessOnInstall  || echo skip" "$MonkeyDevDeviceIP" "$MonkeyDevDevicePort"
-							fi
-						fi
+			requireDir "$packageInstallPath" true
+			
+			#拷贝目标文件到/Package/Library/MobileSubstrate/DynamicLibraries
+			copyFile "$packageInstallSource" "$packageInstallPath"
 
-						if [[ "$MonkeyDevClearUiCacheOnInstall" == "YES" ]]; then
- 							echo "Clearing uicache device..."
- 							runFuncOnDevice "uicache" "$MonkeyDevDeviceIP" "$MonkeyDevDevicePort"
+			buildPackage "$packageDirectory" "$allPackagesDir" true
+			
+			#profile或者用户设置了build安装
+			if [[ "$CONFIGURATION" == "Release" && "$VALIDATE_PRODUCT" == "YES" ]] || [[ "$MonkeyDevInstallOnAnyBuild" == "YES" ]]; then
+			
+				if [[ "$DEPLOYMENT_POSTPROCESSING" == "NO" || "$MonkeyDevInstallOnAnyBuild" == "YES" ]]; then
+				
+					# if build setting MonkeyDevInstallOnProfiling is enabled, installation of package is enabled...
+					if [[ "$MonkeyDevInstallOnProfiling" == "YES"  || "$MonkeyDevInstallOnAnyBuild" == "YES" ]]; then
+					
+						# if MonkeyDevDeviceIP has a value, install package on device...
+						if [[ "$MonkeyDevDeviceIP" != "" ]]; then
+		
+							# get package file name #
+							packageFileName="`getPackageFileNameUsingControlFile \"$packageDirectory/DEBIAN/control\"`.deb"
+								
+							# install package on device #					
+							managePackageOnDevice "install" "$allPackagesDir/$packageFileName" "$MonkeyDevDeviceIP" "$MonkeyDevDevicePort"
+							
+							if [[ "$MonkeyDevkillProcessOnInstall" != "" ]]; then
+								if [[ "$MonkeyDevkillProcessOnInstall" == "SpringBoard" ]]; then
+									echo "respring device..."
+									runFuncOnDevice "respring" "$MonkeyDevDeviceIP" "$MonkeyDevDevicePort" 
+								else
+									echo "killall -9 $MonkeyDevkillProcessOnInstall"
+									runFuncOnDevice "killall -9 $MonkeyDevkillProcessOnInstall  || echo skip" "$MonkeyDevDeviceIP" "$MonkeyDevDevicePort"
+								fi
+							fi
+
+							if [[ "$MonkeyDevClearUiCacheOnInstall" == "YES" ]]; then
+	 							echo "Clearing uicache device..."
+	 							runFuncOnDevice "uicache" "$MonkeyDevDeviceIP" "$MonkeyDevDevicePort"
+							fi
+						else
+							# build setting MonkeyDevDeviceIP is empty #
+							panic 1 "Unable to install package on device since build setting MonkeyDevDeviceIP is not set or is empty and it is not exported in your Bash personal initialization file"
 						fi
 					else
-						# build setting MonkeyDevDeviceIP is empty #
-						panic 1 "Unable to install package on device since build setting MonkeyDevDeviceIP is not set or is empty and it is not exported in your Bash personal initialization file"
+						# build setting MonkeyDevInstallOnProfiling is disabled #
+						echo "Installation of package on device is disabled. To enable, set build setting MonkeyDevInstallOnProfiling to YES."
 					fi
-				else
-					# build setting MonkeyDevInstallOnProfiling is disabled #
-					echo "Installation of package on device is disabled. To enable, set build setting MonkeyDevInstallOnProfiling to YES."
 				fi
 			fi
 		fi
